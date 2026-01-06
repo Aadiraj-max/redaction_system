@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict
 import requests
 import json
 import os
@@ -149,3 +149,78 @@ If nothing matches: []"""
             confidence=0.0,
             reasoning="Fallback"
         )
+
+def validate_candidates(candidates: List[Dict], context_text: str) -> List[Dict]:
+    """
+    Job 2: Analyst Mode.
+    Review uncertain candidates and decide if they are PII based on context.
+    """
+    if not candidates:
+        return []
+
+    ollama_host = os.getenv("OLLAMA_HOST")
+    model = os.getenv("OLLAMA_MODEL")
+    
+    # Construct a concise prompt with snippets
+    candidate_desc = "\n".join([
+        f"- ID {c.get('id', i)}: '{c['text']}' (Type: {c['entity_type']}) \n  Context: \"...{c.get('context', 'N/A')}...\"" 
+        for i, c in enumerate(candidates)
+    ])
+    
+    system_prompt = """You are an expert Data Privacy Analyst. 
+Your job is to VALIDATE potential PII candidates found in text.
+Presidio has flagged these terms with LOW confidence. You must decide if they are truly PII based on context.
+
+Candidates to Validate:
+{candidates}
+
+INSTRUCTIONS:
+1. For each candidate, look at its specific 'Context' snippet.
+2. Determine if it is a TRUE POSITIVE (Real PII/Sensitive) or FALSE POSITIVE (Safe/Not PII).
+3. If the user's intent is to redact a category, be conservative and mark it as TRUE if it likely belongs to that category.
+
+OUTPUT:
+JSON list of IDs for the TRUE POSITIVES only.
+Example: [0, 2]
+"""
+
+    prompt = system_prompt.format(candidates=candidate_desc)
+
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+        "options": {"temperature": 0.0}
+    }
+
+    try:
+        response = requests.post(f"{ollama_host}/api/generate", json=payload, timeout=30)
+        response.raise_for_status()
+        result = response.json()
+        
+        # Parse output
+        valid_ids = json.loads(result['response'].strip())
+        
+        # Helper to parse if it's wrapped in a dict
+        if isinstance(valid_ids, dict):
+             # Try to find a list value
+             for k, v in valid_ids.items():
+                 if isinstance(v, list):
+                     valid_ids = v
+                     break
+        
+        if not isinstance(valid_ids, list):
+            valid_ids = [] # Fail safe
+            
+        # Return only the validated candidates
+        validated = [candidates[i] for i in valid_ids if isinstance(i, int) and 0 <= i < len(candidates)]
+        
+        if validated:
+            print(f"   🤖 Agent recovered {len(validated)} uncertain entities: {[c['text'] for c in validated]}")
+            
+        return validated
+
+    except Exception as e:
+        print(f"   ⚠️ Agent validation failed: {e}")
+        return []
