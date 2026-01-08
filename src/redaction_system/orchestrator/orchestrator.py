@@ -60,17 +60,14 @@ class Orchestrator:
             certain = [r for r in results if r.score >= 0.7]
             uncertain = [r for r in results if r.score < 0.7]
             
-            # C. Job 2 - Agent validates uncertain entities
+           # C. Job 2 - Agent validates uncertain entities
             validated = []
+            candidates_for_llm = []
             if uncertain:
-                # Prepare candidates for the analyst (Job 2)
-                # We use a context window of +/- 50 chars for the LLM
-                candidates_for_llm = []
                 for idx, r in enumerate(uncertain):
                     start = max(0, r.start - 50)
                     end = min(len(text), r.end + 50)
                     context_snippet = text[start:end]
-                    
                     candidates_for_llm.append({
                         'id': idx,
                         'text': text[r.start:r.end],
@@ -79,17 +76,13 @@ class Orchestrator:
                         'start': r.start,
                         'end': r.end
                     })
-                
-                # Batch call to Agent for validation
-                # (Passing 'text' as full context, but candidates have snippets)
-                validated_dicts = validate_candidates(candidates_for_llm, text)
-                
-                # Map back to Presidio objects
-                for v in validated_dicts:
-                    for r in uncertain:
-                        if r.start == v['start'] and r.end == v['end']:
-                            validated.append(r)
-                            break
+    
+            # Get validated indices from LLM
+            validated_indices = validate_candidates(candidates_for_llm, text)
+    
+            # Map indices back to original Presidio objects
+            validated = [uncertain[i] for i in validated_indices]
+
             
             # D. Combine and Redact
             final_results = certain + validated

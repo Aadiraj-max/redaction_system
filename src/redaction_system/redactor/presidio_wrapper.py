@@ -3,6 +3,7 @@ from typing import List
 from presidio_analyzer import AnalyzerEngine, RecognizerResult
 from presidio_anonymizer import AnonymizerEngine
 from ..agent.prompt_interpreter import EntityConfig
+from ..redactor.custom_recognizers import register_custom_recognizers
 
 class PresidioRedactor:
     """Wrapper for Presidio Analyzer and Anonymizer"""
@@ -12,7 +13,10 @@ class PresidioRedactor:
         self.language = language
         self.analyzer = AnalyzerEngine()
         self.anonymizer = AnonymizerEngine()
-    
+
+        # Register custom recognizers
+        register_custom_recognizers(self.analyzer)
+
     def analyze(self, text: str, entities: List[str], score_threshold: float = 0.3) -> List[RecognizerResult]:
         """Step 1: Scan for PII candidates"""
         return self.analyzer.analyze(

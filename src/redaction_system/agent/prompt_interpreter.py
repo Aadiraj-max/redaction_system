@@ -38,6 +38,13 @@ AVAILABLE ENTITY TYPES:
 - IP_ADDRESS (IP addresses)
 - URL (websites, URLs)
 - LOCATION (places, addresses, cities, countries)
+- PAN (Permanent Account Number, India)
+- AADHAAR (Aadhaar unique ID, India)
+- BANK_ACCOUNT (Bank account numbers)
+- IFSC (IFSC bank code)
+- GST_REGISTRATION (GST registration number)
+- CIN (Corporate Identification Number)
+
 
 INSTRUCTIONS:
 1. UNDERSTAND THE USER'S INTENT (what are they really trying to protect?)
@@ -132,7 +139,8 @@ If nothing matches: []"""
         valid_entities = [
             "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "US_SSN", 
             "CREDIT_CARD", "DATE_TIME", "ORGANIZATION", 
-            "IP_ADDRESS", "URL", "LOCATION"
+            "IP_ADDRESS", "URL", "LOCATION", 
+            "PAN", "AADHAAR", "BANK_ACCOUNT", "IFSC", "GST_REGISTRATION", "CIN"
         ]
         filtered_entities = [e for e in entities if e in valid_entities]
         
@@ -150,77 +158,74 @@ If nothing matches: []"""
             reasoning="Fallback"
         )
 
-def validate_candidates(candidates: List[Dict], context_text: str) -> List[Dict]:
+def validate_candidates(candidates: List[Dict], context_text: str) -> List[int]:
     """
-    Job 2: Analyst Mode.
-    Review uncertain candidates and decide if they are PII based on context.
+    Job 2: Analyst Mode. Review uncertain candidates and return the INDICES of valid ones.
+    
+    Returns: List of integers (indices in the candidates list that are TRUE positives)
     """
     if not candidates:
         return []
-
-    ollama_host = os.getenv("OLLAMA_HOST")
-    model = os.getenv("OLLAMA_MODEL")
     
-    # Construct a concise prompt with snippets
+    ollama_host = os.getenv('OLLAMA_HOST')
+    model = os.getenv('OLLAMA_MODEL')
+    
+    # Build candidate descriptions with their IDs
     candidate_desc = "\n".join([
-        f"- ID {c.get('id', i)}: '{c['text']}' (Type: {c['entity_type']}) \n  Context: \"...{c.get('context', 'N/A')}...\"" 
+        f"- ID: {i}, Text: '{c.get('text')}', Type: {c.get('entity_type')}, Context: '...{c.get('context', 'N/A')}...'"
         for i, c in enumerate(candidates)
     ])
     
-    system_prompt = """You are an expert Data Privacy Analyst. 
-Your job is to VALIDATE potential PII candidates found in text.
-Presidio has flagged these terms with LOW confidence. You must decide if they are truly PII based on context.
+    system_prompt = f"""You are an expert Data Privacy Analyst. Your job is to VALIDATE potential PII candidates.
 
-Candidates to Validate:
-{candidates}
+Presidio flagged these with LOW confidence. Decide if they are TRUE PII based on context.
 
-INSTRUCTIONS:
-1. For each candidate, look at its specific 'Context' snippet.
-2. Determine if it is a TRUE POSITIVE (Real PII/Sensitive) or FALSE POSITIVE (Safe/Not PII).
-3. If the user's intent is to redact a category, be conservative and mark it as TRUE if it likely belongs to that category.
+Candidates:
+{candidate_desc}
 
-OUTPUT:
-JSON list of IDs for the TRUE POSITIVES only.
-Example: [0, 2]
+RULES:
+1. TRUE POSITIVE: Real person names, real account numbers, real PII
+2. FALSE POSITIVE: Employee IDs (EMP-XXXX), generic patterns, non-sensitive terms
+3. Look at the Context to decide
+
+OUTPUT: JSON array of IDs that are TRUE positives.
+Example: [0, 2, 3]
 """
-
-    prompt = system_prompt.format(candidates=candidate_desc)
-
+    
     payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-        "options": {"temperature": 0.0}
+        'model': model,
+        'prompt': system_prompt,
+        'stream': False,
+        'format': 'json',
+        'options': {'temperature': 0.0}
     }
-
+    
     try:
-        response = requests.post(f"{ollama_host}/api/generate", json=payload, timeout=30)
+        response = requests.post(f'{ollama_host}/api/generate', json=payload, timeout=30)
         response.raise_for_status()
         result = response.json()
         
-        # Parse output
         valid_ids = json.loads(result['response'].strip())
         
-        # Helper to parse if it's wrapped in a dict
+        # Handle if LLM wrapped it in a dict
         if isinstance(valid_ids, dict):
-             # Try to find a list value
-             for k, v in valid_ids.items():
-                 if isinstance(v, list):
-                     valid_ids = v
-                     break
+            for k, v in valid_ids.items():
+                if isinstance(v, list):
+                    valid_ids = v
+                    break
         
         if not isinstance(valid_ids, list):
-            valid_ids = [] # Fail safe
-            
-        # Return only the validated candidates
-        validated = [candidates[i] for i in valid_ids if isinstance(i, int) and 0 <= i < len(candidates)]
+            valid_ids = []
         
-        if validated:
-            print(f"   🤖 Agent recovered {len(validated)} uncertain entities: {[c['text'] for c in validated]}")
-            
-        return validated
-
+        # Validate indices are integers in range
+        valid_ids = [i for i in valid_ids if isinstance(i, int) and 0 <= i < len(candidates)]
+        
+        if valid_ids:
+            validated_texts = [candidates[i]['text'] for i in valid_ids]
+            print(f"✓ Agent validated {len(valid_ids)} entities: {validated_texts}")
+        
+        return valid_ids  # Return list of INDICES, not dicts
+        
     except Exception as e:
-        print(f"   ⚠️ Agent validation failed: {e}")
+        print(f"✗ Agent validation failed: {e}")
         return []

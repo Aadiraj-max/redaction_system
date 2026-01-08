@@ -38,3 +38,10 @@
 -   `code/redaction_project/`: **GIT REPO ROOT**. Contains source code.
 -   `tools/`: Helper scripts.
 -   `tests/data/`: Test documents (e.g., `yes_bank_q2_fy26_report.txt`).
+
+## 6. Recent Updates & Findings (2026-01-08)
+-   **Bug Fix:** Fixed `UnboundLocalError` in `orchestrator.py` where `candidates_for_llm` was not initialized if `uncertain` list was empty.
+-   **Test Run (`yes_bank_q2_fy26_report.txt`):**
+    -   **Job 1 Limitation:** Prompt "redact... financial report" caused Agent to select ONLY financial entities (`CREDIT_CARD`, `BANK_ACCOUNT`, etc.), missing `PERSON`, `EMAIL_ADDRESS`, `PHONE_NUMBER`. This left names and contacts exposed.
+    -   **False Positives:** `BANK_ACCOUNT` regex (`\b\d{9,18}\b`) matched phone numbers (e.g., `9876543210`). Job 2 validated them as PII, so they were redacted (technically correct outcome, wrong type).
+    -   **Missed Redactions:** Some instances of phone numbers (e.g., `+91-9876543210` in header) were NOT detected by Presidio, likely due to tokenization/regex boundary issues with `+91-`.
