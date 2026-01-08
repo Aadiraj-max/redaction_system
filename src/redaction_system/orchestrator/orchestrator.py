@@ -52,7 +52,9 @@ class Orchestrator:
             
             # A. Presidio Processes (with low threshold to catch everything)
             results = self.redactor.analyze(text, config.entities, score_threshold=0.1)
-            print(f"   Raw Presidio found {len(results)} candidates")
+            print(f"   Raw Presidio found {len(results)} candidates:")
+            for r in results:
+                print(f"     - '{text[r.start:r.end]}' (Type: {r.entity_type}, Score: {r.score:.2f})")
             
             # B. Split by confidence
             certain = [r for r in results if r.score >= 0.7]
